@@ -82,6 +82,7 @@
     <None Include="Sch2.xsd">
       <SubType>Designer</SubType>
     </None>
+    <None Include="Resources\template.xml.txt" />
     <Content Include="Service1.svc" />
     <Content Include="Web.config">
       <SubType>Designer</SubType>
@@ -96,6 +97,11 @@
     <Compile Include="Helpers\KeyService.cs" />
     <Compile Include="Helpers\Namespaces.cs" />
     <Compile Include="Interceptors\MessageInspector.cs" />
+    <Compile Include="Resource1.Designer.cs">
+      <AutoGen>True</AutoGen>
+      <DesignTime>True</DesignTime>
+      <DependentUpon>Resource1.resx</DependentUpon>
+    </Compile>
     <Compile Include="smev\MessageData.cs" />
     <Compile Include="StatusType.cs" />
     <Compile Include="Service1.svc.cs">
@@ -128,6 +134,12 @@
   </ItemGroup>
   <ItemGroup>
     <WCFMetadata Include="Service References\" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resource1.resx">
+      <Generator>ResXFileCodeGenerator</Generator>
+      <LastGenOutput>Resource1.Designer.cs</LastGenOutput>
+    </EmbeddedResource>
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>

@@ -35,7 +35,6 @@ namespace SMEVService.Interceptors
                 DigestMethod = CryptoPro.Sharpei.Xml.CPSignedXml.XmlDsigGost3411UrlObsolete
             };
 
-
             //Задаём алгоритм хэширования подписываемого узла - ГОСТ Р 34.11-94. Необходимо использовать устаревший идентификатор данного алгоритма, 
             //т.к. именно такой идентификатор используется в СМЭВ:
             //Преобразование (transform) для создания приложенной подписи в данном примере не нужно. 
@@ -50,6 +49,10 @@ namespace SMEVService.Interceptors
 
             //Задаём алгоритм подписи - ГОСТ Р 34.10-2001. Необходимо использовать устаревший идентификатор данного алгоритма, т.к. именно такой идентификатор используется в СМЭВ:
             signedXml.SignedInfo.SignatureMethod = CryptoPro.Sharpei.Xml.CPSignedXml.XmlDsigGost3410UrlObsolete;
+
+            KeyInfo keyInfo = new KeyInfo();
+            keyInfo.AddClause(new KeyInfoX509Data(certificate));
+            signedXml.KeyInfo = keyInfo;
 
             //Вычисляем
             signedXml.ComputeSignature();
@@ -76,7 +79,7 @@ namespace SMEVService.Interceptors
                     "<ds:SignatureValue>{1}</ds:SignatureValue>" +
                     "<ds:KeyInfo>" +
                     "<ds:X509Data>" +
-                    "<ds:X509Certificate>{2}</ds:X509Certificate>" +
+                        "<ds:X509Certificate>{2}</ds:X509Certificate>" +
                     "</ds:X509Data>" +
                     "</ds:KeyInfo>" +
                 "</ds:Signature>";
@@ -94,10 +97,49 @@ namespace SMEVService.Interceptors
             messageData.AppendChild(xfrag);
         }
 
+
+        private XmlDocument Prepare(string xml)
+        {
+
+            XmlDocument xmlDoc = new XmlDocument();
+            xmlDoc.LoadXml(Resource1.template);
+
+            var tmplateBody = xmlDoc.GetElementsByTagName("s:Body");
+            var tmplateHead = xmlDoc.GetElementsByTagName("s:Header");
+
+            var xmlDoc2 = new XmlDocument();
+            xmlDoc2.LoadXml(xml.Trim(new[] { '\uFEFF', '\u200B' }));
+            //Основное тело запроса
+            var subElem = xmlDoc2.GetElementsByTagName("Smev")[0];
+            //Заголовок
+            var subHead = xmlDoc2.GetElementsByTagName("h:Header")[0];
+            
+            var node = subElem.OuterXml;
+
+            // стандартный десериализатор добавляет какую-то левую фигню
+            node = node.Replace(@" xmlns=" + "\"" + "http://smev.gosuslugi.ru/rev120315" + "\"", "");
+
+            node = node.Replace("xmlns:xsi=" + "\"" + "http://www.w3.org/2001/XMLSchema-instance" + "\" " + "xmlns:xsd=" + "\"" + "http://www.w3.org/2001/XMLSchema" + "\"",
+                @" xmlns=" + "\"" + "http://smev.gosuslugi.ru/rev120315" + "\"");
+
+            tmplateBody[0].InnerXml = node;
+
+            //tmplateHead[0].InnerText = subHead.OuterXml;
+
+            XmlDocumentFragment xfrag = xmlDoc.CreateDocumentFragment();
+            xfrag.InnerXml = subHead.OuterXml;
+
+            //Добавляем заглушку с подписью в заголовок 
+            tmplateHead[0].AppendChild(xfrag);
+
+            xmlDoc2.PreserveWhitespace = false;
+
+            return xmlDoc;
+        }
         /// <summary>
         /// Добавляет в заголовок блок с подписью
         /// </summary>
-        private System.ServiceModel.Channels.Message ChangeString(System.ServiceModel.Channels.Message oldMessage)
+        private System.ServiceModel.Channels.Message ChangeString2(System.ServiceModel.Channels.Message oldMessage)
         {
             MemoryStream ms = new MemoryStream();
             XmlWriter xw = XmlWriter.Create(ms);
@@ -106,60 +148,22 @@ namespace SMEVService.Interceptors
             string body = Encoding.UTF8.GetString(ms.ToArray());
             xw.Close();
 
-            string sign = "<wsse:Security s:actor=\"http://smev.gosuslugi.ru/actors/smev\" xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:wsse=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd\">" +
-             "<wsse:BinarySecurityToken EncodingType=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary\" ValueType=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3\" wsu:Id=\"{0}\" xmlns:wsu=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd\">" +
-             "</wsse:BinarySecurityToken>" +
-                "<ds:Signature xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\">" +
-                     "<ds:KeyInfo Id=\"KeyId-{0}\">" +
-                         "<wsse:SecurityTokenReference wsu:Id=\"STRId-{0}\" xmlns:wsu=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd\" xmlns:wsse=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd\" >" +
-                            "<wsse:Reference URI=\"#CertId-{0}\" ValueType=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3\" xmlns:wsse=\"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd\"/>" +
-                         "</wsse:SecurityTokenReference>" +
-                     "</ds:KeyInfo>" +
-                 "</ds:Signature>" +
-             "</wsse:Security>";
-
+            XmlDocument doc = Prepare(body);
             //Получаем сертификат
             X509Certificate2 certificate = KeyService.Certificate();
-            //Заполняем заглушку
-            sign = string.Format(sign, certificate.SerialNumber.ToUpper());
 
-            XmlDocument myXmlDocument = new XmlDocument();
-            myXmlDocument.LoadXml(body.Remove(0, 1));
-            //Находим заголовок
-            var header = myXmlDocument.DocumentElement.ChildNodes[0];
-            XmlDocumentFragment xfrag = myXmlDocument.CreateDocumentFragment();
-            xfrag.InnerXml = sign;
-            //Добавляем тэг ид что бы клас SmevSignedXml нашел его
-            XmlNode bodyNode = myXmlDocument.GetElementsByTagName("Body", "http://schemas.xmlsoap.org/soap/envelope/")[0];
-            ((XmlElement)bodyNode).SetAttribute("Id",/* "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd",*/ "body");
-
-
-            //Проверим есть ли блок для плдписи структуированных данных
-            //var appData = myXmlDocument.GetElementById("AppData");
-
-            var appData = myXmlDocument.SelectSingleNode("//*[@Id='AppData']");
+            var appData = doc.SelectSingleNode("//*[@Id='AppData']");
             if (appData != null)
-                SignAppData(myXmlDocument);
+                SignAppData(doc);
 
+            XmlElement xmlDigitalSignature = CreateSign("#body", doc);
+            doc.GetElementsByTagName("ds:Signature")[0].PrependChild(doc.ImportNode(xmlDigitalSignature.GetElementsByTagName("SignatureValue")[0], true));
+            doc.GetElementsByTagName("ds:Signature")[0].PrependChild(doc.ImportNode(xmlDigitalSignature.GetElementsByTagName("SignedInfo")[0], true));
+            doc.GetElementsByTagName("wsse:BinarySecurityToken")[0].InnerText = xmlDigitalSignature.GetElementsByTagName("X509Certificate")[0].InnerText;
 
-            //Добавляем заглушку с подписью в заголовок 
-            header.AppendChild(xfrag);
-
-            //Строим зашифрованнй блок для body
-            XmlElement xmlDigitalSignature = CreateSign("#body", myXmlDocument);
-
-            //После вычисления подписи вместо добавления полученного узла ds:Signature в документ целиком необходимо взять лишь некоторые подузлы и вставить их в заготовленное место:
-            myXmlDocument.GetElementsByTagName("ds:Signature")[0].PrependChild(
-                    myXmlDocument.ImportNode(xmlDigitalSignature.GetElementsByTagName("SignatureValue")[0], true));
-            myXmlDocument.GetElementsByTagName("ds:Signature")[0].PrependChild(
-                    myXmlDocument.ImportNode(xmlDigitalSignature.GetElementsByTagName("SignedInfo")[0], true));
-
-            myXmlDocument.GetElementsByTagName("wsse:BinarySecurityToken")[0].InnerText =
-            Convert.ToBase64String(certificate.RawData);
-
-
-            //Пишем ответ
-            ms = new MemoryStream(Encoding.UTF8.GetBytes(myXmlDocument.InnerXml));
+            //Отладка
+            File.WriteAllText(@"D:\Temp\sign.txt", doc.InnerXml);
+            ms = new MemoryStream(Encoding.UTF8.GetBytes(doc.InnerXml));
             XmlDictionaryReader xdr = XmlDictionaryReader.CreateTextReader(ms, new XmlDictionaryReaderQuotas());
             System.ServiceModel.Channels.Message newMessage = System.ServiceModel.Channels.Message.CreateMessage(xdr, int.MaxValue, oldMessage.Version);
             newMessage.Properties.CopyProperties(oldMessage.Properties);
@@ -170,7 +174,7 @@ namespace SMEVService.Interceptors
         public void BeforeSendReply(ref System.ServiceModel.Channels.Message reply, object correlationState)
         {
             Debug.WriteLine("BeforeSendReply");
-            reply = ChangeString(reply);
+            reply = ChangeString2(reply);
         }
 
         //The AfterReceiveRequest method is fired after the message has been received but prior to invoking the service operation
